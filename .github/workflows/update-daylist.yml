@@ -1,0 +1,78 @@
+name: Update Daylist
+
+on:
+  schedule:
+    - cron: "0 * * * *" # Run every hour
+  workflow_dispatch: # Allow manual triggers
+  push: # Run on any push to any branch
+
+permissions:
+  contents: read
+  id-token: write
+  actions: write
+
+jobs:
+  update-daylist:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: |
+          playwright install chromium --with-deps
+
+      - name: Create .env file
+        run: |
+          cat > .env << 'EOL'
+          CLIENT_ID=${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
+          SPOTIFY_COOKIES='${{ secrets.SPOTIFY_COOKIES }}'
+          EOL
+
+      - name: Refresh Spotify Token
+        env:
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+        run: python scripts/get_refresh_token.py
+
+      - name: Run daylist fetcher
+        env:
+          SPOTIFY_USER: ${{ secrets.SPOTIFY_USER }}
+          SPOTIFY_PASS: ${{ secrets.SPOTIFY_PASS }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          SPOTIFY_COOKIES: ${{ secrets.SPOTIFY_COOKIES }}
+        run: python scripts/fetch_daylist.py
+
+      - name: Upload daylist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daylist
+          path: data/daylist.txt
+          retention-days: 1
