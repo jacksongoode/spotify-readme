@@ -1,0 +1,116 @@
+<svg width="300" height="100" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <foreignObject width="300" height="100">
+        <div xmlns="http://www.w3.org/1999/xhtml" class="container">
+            <style>
+                /* CSS Reset */
+                html,
+                body,
+                div,
+                span,
+                h1,
+                p,
+                a,
+                img {
+                    margin: 0;
+                    padding: 0;
+                    border: 0;
+                    font-size: 100%;
+                    font: inherit;
+                    vertical-align: baseline;
+                }
+
+                /* Actual Styles */
+                main {
+                    display: flex;
+                    padding: 8px;
+                    border-radius: 10px;
+                    background: white;
+                    border: 1px solid rgba(0, 0, 0, 0.1);
+                }
+
+                aside {
+                    width: 300px;
+                    display: flex;
+                    position: relative;
+                }
+
+                .cover {
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 10px;
+                    box-shadow:
+                        0 0px 1px rgba(0, 0, 0, 0.15),
+                        0 0px 2px rgba(0, 0, 0, 0.1),
+                        0 0px 4px rgba(0, 0, 0, 0.075),
+                        0 0px 8px rgba(0, 0, 0, 0.05);
+                }
+
+                section {
+                    padding-left: 20px;
+                    width: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+
+                .info {
+                    display: flex;
+                    flex-direction: column;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+                    margin: auto auto auto 0;
+                }
+
+                .top {
+                    display: flex;
+                    align-items: center;
+                }
+
+                h1 {
+                    font-size: 18px;
+                    font-weight: 600;
+                    white-space: nowrap;
+                    text-overflow: ellipsis;
+                    display: block;
+                    overflow: hidden;
+                    max-width: 190px;
+                    color: #161B22;
+                }
+
+                p {
+                    margin-top: 5px;
+                    font-size: 16px;
+                    font-weight: 500;
+                    white-space: nowrap;
+                    text-overflow: ellipsis;
+                    display: block;
+                    overflow: hidden;
+                    max-width: 190px;
+                    color: rgba(22, 27, 34, calc(2/3));
+                }
+
+                .logo {
+                    position: absolute;
+                    top: 60px;
+                    left: 260px;
+                    width: 20px;
+                    height: 20px;
+                }
+            </style>
+            <main>
+                <aside>
+                    <img class="cover" src="data:image/png;base64, {{image}}" alt="Cover Image" />
+                    <section>
+                        <div class="info">
+                            <div class="top">
+                                <h1>{{song}}</h1>
+                            </div>
+                            <p>{{artist}}</p>
+                        </div>
+                        <img class="logo" src="data:image/png;base64, {{logo}}" alt="Spotify Logo" />
+                    </section>
+                </aside>
+            </main>
+        </div>
+    </foreignObject>
+</svg>
