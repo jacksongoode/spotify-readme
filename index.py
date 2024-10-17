@@ -285,5 +285,4 @@ with app.app_context():
     app.logger.info("Initial run of update_daylist_svg")
     update_daylist_svg()
 
-if __name__ == "__main__":
-    app.run()
+app
