@@ -8,7 +8,6 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request
 from flask_caching import Cache
-from flask_apscheduler import APScheduler
 
 load_dotenv()
 app = Flask(__name__)
@@ -22,18 +21,14 @@ cache.init_app(app)
 # Set up logging
 app.logger.setLevel(logging.INFO)
 
-scheduler = APScheduler()
-scheduler.init_app(app)
-scheduler.start()
-
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 B64_PLACEHOLDER_IMAGE, B64_SPOTIFY_LOGO = None, None
 
-# Global variables to store the latest SVGs
-latest_track_svg = None
-latest_daylist_svg = None
-current_track = None
-
+# Global variables to store the cached data
+cached_track = None
+cached_daylist = None
+last_track_update = None
+last_daylist_update = None
 
 def load_base64_images():
     global B64_PLACEHOLDER_IMAGE, B64_SPOTIFY_LOGO
@@ -43,9 +38,7 @@ def load_base64_images():
         B64_PLACEHOLDER_IMAGE = f_placeholder.read().decode("ascii")
         B64_SPOTIFY_LOGO = f_logo.read().decode("ascii")
 
-
 load_base64_images()
-
 
 class SpotifyAPI:
     def __init__(self):
@@ -164,7 +157,7 @@ def fetch_daylist_playlist():
                 full_name.split("• ", 1)[-1] if "• " in full_name else full_name
             )
             time_emoji, formatted_time = get_time_info()
-            return f"(It's about {formatted_time} {time_emoji}, the mood is a {cleaned_name})"
+            return f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
 
         return None
     except Exception:
@@ -178,112 +171,93 @@ def fetch_and_cache_image(image_url):
     return base64.b64encode(image_data).decode("ascii")
 
 
-@app.errorhandler(Exception)
-def handle_exception(e):
-    app.logger.error(f"An unexpected error occurred: {e}")
-    return jsonify({"error": "An unexpected error occurred"}), 500
-
-
-def update_track_svg():
-    global latest_track_svg, current_track
-    app.logger.info("Updating track SVG...")
-    with app.app_context():
+def get_cached_track():
+    global cached_track, last_track_update
+    now = datetime.now()
+    if not cached_track or not last_track_update or (now - last_track_update) > timedelta(minutes=1):
         current_track = fetch_current_track()
-
         if current_track:
-            app.logger.info(
-                f"Retrieved track: {current_track['name']} by {current_track['artists'][0]['name']}"
-            )
             image_url = current_track["album"]["images"][1]["url"] if current_track["album"]["images"] else None
             image_data = B64_PLACEHOLDER_IMAGE if not image_url else fetch_and_cache_image(image_url)
-            # Assemble SVG
-            latest_track_svg = render_template(
-                "recent.html",
-                artist=current_track["artists"][0]["name"].replace("&", "&amp;"),
-                song=current_track["name"].replace("&", "&amp;"),
-                image=image_data,
-                logo=B64_SPOTIFY_LOGO,
-            )
+            cached_track = {
+                "svg": render_template(
+                    "recent.html",
+                    artist=current_track["artists"][0]["name"].replace("&", "&amp;"),
+                    song=current_track["name"].replace("&", "&amp;"),
+                    image=image_data,
+                    logo=B64_SPOTIFY_LOGO,
+                ),
+                "link": current_track["external_urls"]["spotify"]
+            }
         else:
-            app.logger.info("No current track found")
+            cached_track = None
+        last_track_update = now
+    return cached_track
 
-
-def update_daylist_svg():
-    global latest_daylist_svg
-    app.logger.info("Updating daylist SVG...")
-    with app.app_context():
+def get_cached_daylist():
+    global cached_daylist, last_daylist_update
+    now = datetime.now()
+    if not cached_daylist or not last_daylist_update or (now - last_daylist_update) > timedelta(hours=1):
         daylist_phrase = fetch_daylist_playlist()
-
         if daylist_phrase:
-            app.logger.info(f"Retrieved daylist: {daylist_phrase}")
-            latest_daylist_svg = daylist_phrase  # Store only the phrase
+            cached_daylist = daylist_phrase
         else:
-            app.logger.info("No daylist found")
+            cached_daylist = None
+        last_daylist_update = now
+    return cached_daylist
 
-
-# Schedule the playing track update every 60 seconds
-@scheduler.task("interval", id="update_track_svg", seconds=60)
-def scheduled_update_track_svg():
-    app.logger.info("Running scheduled task: update_track_svg")
-    update_track_svg()
-
-
-# Schedule the daylist SVG update every 30 minutes
-@scheduler.task("interval", id="update_daylist_svg", seconds=1800)
-def scheduled_update_daylist_svg():
-    app.logger.info("Running scheduled task: update_daylist_svg")
-    update_daylist_svg()
-
+@app.before_request
+def update_cache():
+    get_cached_track()
+    get_cached_daylist()
 
 @app.route("/")
 @app.route("/svg")
 def get_svg():
-    if latest_track_svg:
-        response = Response(latest_track_svg, mimetype="image/svg+xml")
+    track_data = get_cached_track()
+    if track_data and track_data["svg"]:
+        response = Response(track_data["svg"], mimetype="image/svg+xml")
         response.headers["Cache-Control"] = "public, max-age=60"
         return response
     return jsonify({"error": "SVG not ready"}), 503
 
-
 @app.route("/link")
 def get_track_link():
-    if current_track:
-        return redirect(current_track["external_urls"]["spotify"])
+    track_data = get_cached_track()
+    if track_data and track_data["link"]:
+        return redirect(track_data["link"])
     return jsonify({"error": "No track link available"}), 404
-
 
 @app.route("/daylist")
 @app.route("/daylist/light")
 @app.route("/daylist/dark")
 def daylist():
-    global latest_daylist_svg
-    if latest_daylist_svg:
+    daylist_phrase = get_cached_daylist()
+    if daylist_phrase:
         color_scheme = "dark" if request.path.endswith("/dark") else "light"
-        
-        # Generate a new SVG with the correct color scheme
         svg = render_template(
             "daylist.svg",
-            daylist_phrase=latest_daylist_svg,
+            daylist_phrase=daylist_phrase,
             color_scheme=color_scheme,
             logo=B64_SPOTIFY_LOGO,
         )
-        
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=1800"  # Cache for 30 minutes
+        response.headers["Cache-Control"] = "public, max-age=1800"
         return response
     return jsonify({"error": "Daylist SVG not ready"}), 503
-
 
 @app.route('/favicon.ico')
 def favicon():
     return Response(status=204)
 
-# Move this outside of the if __name__ == "__main__" block
+@app.errorhandler(Exception)
+def handle_exception(e):
+    app.logger.error(f"An unexpected error occurred: {e}")
+    return jsonify({"error": "An unexpected error occurred"}), 500
+
+# Initialize the cache
 with app.app_context():
-    # Run the jobs once immediately to populate the SVGs
-    app.logger.info("Initial run of update_track_svg")
-    update_track_svg()
-    app.logger.info("Initial run of update_daylist_svg")
-    update_daylist_svg()
+    get_cached_track()
+    get_cached_daylist()
 
 app
