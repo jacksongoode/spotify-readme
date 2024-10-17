@@ -270,10 +270,13 @@ def daylist():
     return jsonify({"error": "Daylist SVG not ready"}), 503
 
 
-if __name__ == "__main__":
-    with app.app_context():
-        # Run the jobs once immediately to populate the SVGs
-        update_track_svg()
-        update_daylist_svg()
+# Move this outside of the if __name__ == "__main__" block
+with app.app_context():
+    # Run the jobs once immediately to populate the SVGs
+    app.logger.info("Initial run of update_track_svg")
+    update_track_svg()
+    app.logger.info("Initial run of update_daylist_svg")
+    update_daylist_svg()
 
+if __name__ == "__main__":
     app.run()
