@@ -274,6 +274,10 @@ def daylist():
     return jsonify({"error": "Daylist SVG not ready"}), 503
 
 
+@app.route('/favicon.ico')
+def favicon():
+    return Response(status=204)
+
 # Move this outside of the if __name__ == "__main__" block
 with app.app_context():
     # Run the jobs once immediately to populate the SVGs
