@@ -214,14 +214,10 @@ def update_daylist_svg():
     with app.app_context():
         daylist_phrase = fetch_daylist_playlist()
 
+        # Store only the phrase, not the full SVG
         if daylist_phrase:
             app.logger.info(f"Retrieved daylist: {daylist_phrase}")
-            latest_daylist_svg = render_template(
-                "daylist.svg",
-                daylist_phrase=daylist_phrase,
-                color_scheme="{{ color_scheme }}",  # Use a placeholder
-                logo=B64_SPOTIFY_LOGO,
-            )
+            latest_daylist_svg = daylist_phrase
         else:
             app.logger.info("No daylist found")
 
@@ -261,11 +257,22 @@ def get_track_link():
 @app.route("/daylist/light")
 @app.route("/daylist/dark")
 def daylist():
+    global latest_daylist_svg
     if latest_daylist_svg:
-        color_scheme = "dark" if request.path == "/daylist/dark" else "light"
-        svg = latest_daylist_svg.replace("{{ color_scheme }}", color_scheme)
+        color_scheme = "dark" if request.path.endswith("/dark") else "light"
+        
+        # Generate a new SVG with the correct color scheme
+        svg = render_template(
+            "daylist.svg",
+            daylist_phrase=fetch_daylist_playlist(),
+            color_scheme=color_scheme,
+            logo=B64_SPOTIFY_LOGO,
+        )
+        
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=1800"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         return response
     return jsonify({"error": "Daylist SVG not ready"}), 503
 
