@@ -1,4 +1,0 @@
-flask
-flask-caching
-requests
-python-dotenv

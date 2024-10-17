@@ -1,23 +1,26 @@
 import base64
+import logging
 import os
 import zoneinfo
 from datetime import datetime, timedelta
-import logging
 
 import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request
-from flask_caching import Cache
 from flask_apscheduler import APScheduler
+from flask_caching import Cache
 
 load_dotenv()
 app = Flask(__name__)
-app.config.from_mapping(
+app.config.update(
     CACHE_TYPE="simple",
     CACHE_DEFAULT_TIMEOUT=60,
 )
 cache = Cache(app)
 cache.init_app(app)
+
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+B64_PLACEHOLDER_IMAGE, B64_SPOTIFY_LOGO = None, None
 
 # Set up logging
 app.logger.setLevel(logging.INFO)
@@ -25,14 +28,6 @@ app.logger.setLevel(logging.INFO)
 scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
-
-SPOTIFY_API_BASE = "https://api.spotify.com/v1"
-B64_PLACEHOLDER_IMAGE, B64_SPOTIFY_LOGO = None, None
-
-# Global variables to store the latest SVGs
-latest_track_svg = None
-latest_daylist_svg = None
-current_track = None
 
 
 def load_base64_images():
@@ -184,9 +179,14 @@ def handle_exception(e):
     return jsonify({"error": "An unexpected error occurred"}), 500
 
 
+# Global variables to store the latest SVGs
+latest_track_svg = None
+latest_daylist_svg = None
+current_track = None
+
+
 def update_track_svg():
     global latest_track_svg, current_track
-    app.logger.info("Updating track SVG...")
     with app.app_context():
         current_track = fetch_current_track()
 
@@ -194,8 +194,16 @@ def update_track_svg():
             app.logger.info(
                 f"Retrieved track: {current_track['name']} by {current_track['artists'][0]['name']}"
             )
-            image_url = current_track["album"]["images"][1]["url"] if current_track["album"]["images"] else None
-            image_data = B64_PLACEHOLDER_IMAGE if not image_url else fetch_and_cache_image(image_url)
+            image_url = (
+                current_track["album"]["images"][1]["url"]
+                if current_track["album"]["images"]
+                else None
+            )
+            image_data = (
+                B64_PLACEHOLDER_IMAGE
+                if not image_url
+                else fetch_and_cache_image(image_url)
+            )
             # Assemble SVG
             latest_track_svg = render_template(
                 "recent.html",
@@ -210,7 +218,6 @@ def update_track_svg():
 
 def update_daylist_svg():
     global latest_daylist_svg
-    app.logger.info("Updating daylist SVG...")
     with app.app_context():
         daylist_phrase = fetch_daylist_playlist()
 
@@ -229,14 +236,12 @@ def update_daylist_svg():
 # Schedule the playing track update every 60 seconds
 @scheduler.task("interval", id="update_track_svg", seconds=60)
 def scheduled_update_track_svg():
-    app.logger.info("Running scheduled task: update_track_svg")
     update_track_svg()
 
 
 # Schedule the daylist SVG update every 30 minutes
 @scheduler.task("interval", id="update_daylist_svg", seconds=1800)
 def scheduled_update_daylist_svg():
-    app.logger.info("Running scheduled task: update_daylist_svg")
     update_daylist_svg()
 
 
