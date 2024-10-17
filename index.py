@@ -214,10 +214,9 @@ def update_daylist_svg():
     with app.app_context():
         daylist_phrase = fetch_daylist_playlist()
 
-        # Store only the phrase, not the full SVG
         if daylist_phrase:
             app.logger.info(f"Retrieved daylist: {daylist_phrase}")
-            latest_daylist_svg = daylist_phrase
+            latest_daylist_svg = daylist_phrase  # Store only the phrase
         else:
             app.logger.info("No daylist found")
 
@@ -264,15 +263,13 @@ def daylist():
         # Generate a new SVG with the correct color scheme
         svg = render_template(
             "daylist.svg",
-            daylist_phrase=fetch_daylist_playlist(),
+            daylist_phrase=latest_daylist_svg,
             color_scheme=color_scheme,
             logo=B64_SPOTIFY_LOGO,
         )
         
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+        response.headers["Cache-Control"] = "public, max-age=1800"  # Cache for 30 minutes
         return response
     return jsonify({"error": "Daylist SVG not ready"}), 503
 
