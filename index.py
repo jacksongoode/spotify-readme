@@ -3,11 +3,13 @@ import os
 import zoneinfo
 from datetime import datetime, timedelta
 import logging
+import json
 
 import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request
 from flask_caching import Cache
+from vercel_edge import EdgeConfig
 
 load_dotenv()
 app = Flask(__name__)
@@ -19,16 +21,13 @@ cache = Cache(app)
 cache.init_app(app)
 
 # Set up logging
-app.logger.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 B64_PLACEHOLDER_IMAGE, B64_SPOTIFY_LOGO = None, None
 
-# Global variables to store the cached data
-cached_track = None
-cached_daylist = None
-last_track_update = None
-last_daylist_update = None
+edge_config = EdgeConfig("EDGE_CONFIG")
 
 def load_base64_images():
     global B64_PLACEHOLDER_IMAGE, B64_SPOTIFY_LOGO
@@ -157,59 +156,92 @@ def fetch_daylist_playlist():
                 full_name.split("• ", 1)[-1] if "• " in full_name else full_name
             )
             time_emoji, formatted_time = get_time_info()
-            return f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
+            result = f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
+            logger.info(f"Fetched daylist: {result}")
+            
+            # Store the result in Edge Config
+            edge_config.items["daylist"] = result
+            if not edge_config.is_mock:
+                with open(f"/opt/edge-config/{edge_config.id}.json", "w") as file:
+                    json.dump(edge_config.config, file)
+            
+            return result
 
+        logger.warning("No daylist found in user playlists")
         return None
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error fetching daylist: {str(e)}")
         return None
 
 
-@cache.memoize(timeout=86400)
 def fetch_and_cache_image(image_url):
+    cached_image = edge_config.get(f"image_{image_url}")
+    if cached_image:
+        return cached_image
+    
     image_response = spotify_api.session.get(image_url)
     image_data = image_response.content
-    return base64.b64encode(image_data).decode("ascii")
+    encoded_image = base64.b64encode(image_data).decode("ascii")
+    
+    edge_config.items[f"image_{image_url}"] = encoded_image
+    if not edge_config.is_mock:
+        with open(f"/opt/edge-config/{edge_config.id}.json", "w") as file:
+            json.dump(edge_config.config, file)
+    
+    return encoded_image
 
 
 def get_cached_track():
-    global cached_track, last_track_update
-    now = datetime.now()
-    if not cached_track or not last_track_update or (now - last_track_update) > timedelta(minutes=1):
-        current_track = fetch_current_track()
-        if current_track:
-            image_url = current_track["album"]["images"][1]["url"] if current_track["album"]["images"] else None
-            image_data = B64_PLACEHOLDER_IMAGE if not image_url else fetch_and_cache_image(image_url)
-            cached_track = {
-                "svg": render_template(
-                    "recent.html",
-                    artist=current_track["artists"][0]["name"].replace("&", "&amp;"),
-                    song=current_track["name"].replace("&", "&amp;"),
-                    image=image_data,
-                    logo=B64_SPOTIFY_LOGO,
-                ),
-                "link": current_track["external_urls"]["spotify"]
-            }
-        else:
-            cached_track = None
-        last_track_update = now
-    return cached_track
+    now = datetime.now().timestamp()
+    cached_data = edge_config.get("track_data")
+    if cached_data and now - cached_data.get("timestamp", 0) < 60:  # 1 minute expiration
+        return cached_data["track"]
+    
+    current_track = fetch_current_track()
+    if current_track:
+        image_url = current_track["album"]["images"][1]["url"] if current_track["album"]["images"] else None
+        image_data = B64_PLACEHOLDER_IMAGE if not image_url else fetch_and_cache_image(image_url)
+        artist = current_track["artists"][0]["name"].replace("&", "&amp;")
+        song = current_track["name"].replace("&", "&amp;")
+        track_data = {
+            "svg": render_template(
+                "recent.html",
+                artist=artist,
+                song=song,
+                image=image_data,
+                logo=B64_SPOTIFY_LOGO,
+            ),
+            "link": current_track["external_urls"]["spotify"],
+            "artist": artist,
+            "song": song
+        }
+        edge_config.items["track_data"] = {"track": track_data, "timestamp": now}
+        if not edge_config.is_mock:
+            with open(f"/opt/edge-config/{edge_config.id}.json", "w") as file:
+                json.dump(edge_config.config, file)
+        logger.info(f"Fetched new track: {song} by {artist}")
+        return track_data
+    logger.warning("No current track found")
+    return None
+
 
 def get_cached_daylist():
-    global cached_daylist, last_daylist_update
-    now = datetime.now()
-    if not cached_daylist or not last_daylist_update or (now - last_daylist_update) > timedelta(hours=1):
-        daylist_phrase = fetch_daylist_playlist()
-        if daylist_phrase:
-            cached_daylist = daylist_phrase
-        else:
-            cached_daylist = None
-        last_daylist_update = now
-    return cached_daylist
+    now = datetime.now().timestamp()
+    cached_data = edge_config.get("daylist_data")
+    if cached_data and now - cached_data.get("timestamp", 0) < 3600:  # 1 hour expiration
+        return cached_data["daylist"]
+    
+    daylist_phrase = fetch_daylist_playlist()
+    if daylist_phrase:
+        edge_config.items["daylist_data"] = {"daylist": daylist_phrase, "timestamp": now}
+        if not edge_config.is_mock:
+            with open(f"/opt/edge-config/{edge_config.id}.json", "w") as file:
+                json.dump(edge_config.config, file)
+        logger.info(f"Updated cached daylist: {daylist_phrase}")
+        return daylist_phrase
+    logger.warning("Failed to fetch daylist")
+    return None
 
-@app.before_request
-def update_cache():
-    get_cached_track()
-    get_cached_daylist()
 
 @app.route("/")
 @app.route("/svg")
@@ -217,15 +249,19 @@ def get_svg():
     track_data = get_cached_track()
     if track_data and track_data["svg"]:
         response = Response(track_data["svg"], mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=60"
+        response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60"
+        logger.info(f"Served current track SVG: {track_data['song']} by {track_data['artist']}")
         return response
+    logger.error("Current track SVG not ready")
     return jsonify({"error": "SVG not ready"}), 503
 
 @app.route("/link")
 def get_track_link():
     track_data = get_cached_track()
     if track_data and track_data["link"]:
+        logger.info(f"Redirected to track link: {track_data['link']}")
         return redirect(track_data["link"])
+    logger.error("No track link available")
     return jsonify({"error": "No track link available"}), 404
 
 @app.route("/daylist")
@@ -242,10 +278,13 @@ def daylist():
             logo=B64_SPOTIFY_LOGO,
         )
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=1800"
+        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=3600"
+        logger.info(f"Served daylist SVG: {daylist_phrase}")
         return response
+    logger.error("Daylist SVG not ready")
     return jsonify({"error": "Daylist SVG not ready"}), 503
 
+@app.route('/favicon.png')
 @app.route('/favicon.ico')
 def favicon():
     return Response(status=204)
