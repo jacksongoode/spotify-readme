@@ -8,28 +8,22 @@
     ],
     "routes": [
         {
-            "src": "/(.*)",
-            "dest": "app/main.py"
-        }
-    ],
-    "headers": [
-        {
-            "source": "/svg",
-            "headers": [
-                {
-                    "key": "Cache-Control",
-                    "value": "public, max-age=60, s-maxage=60"
-                }
-            ]
+            "src": "/svg",
+            "dest": "app/main.py",
+            "headers": {
+                "Cache-Control": "public, max-age=60, s-maxage=60"
+            }
         },
         {
-            "source": "/daylist",
-            "headers": [
-                {
-                    "key": "Cache-Control",
-                    "value": "public, max-age=3600, s-maxage=3600"
-                }
-            ]
+            "src": "/daylist",
+            "dest": "app/main.py",
+            "headers": {
+                "Cache-Control": "public, max-age=3600, s-maxage=3600"
+            }
+        },
+        {
+            "src": "/(.*)",
+            "dest": "app/main.py"
         }
     ]
 }
