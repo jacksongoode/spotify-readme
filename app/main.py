@@ -1,7 +1,7 @@
 import base64
 import os
 import zoneinfo
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from pathlib import Path
 
@@ -81,7 +81,7 @@ def fetch_current_track():
 def get_time_info():
     la_tz = zoneinfo.ZoneInfo("America/Los_Angeles")
     now = datetime.now(la_tz)
-    rounded = now.replace(minute=30 if now.minute < 30 else 0, second=0, microsecond=0) + timedelta(hours=0 if now.minute < 30 else 1)
+    rounded = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0)
     clock_emojis = "🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚"
     half_hour_emojis = "🕧🕜🕝🕞🕟🕠🕡🕢🕣🕤🕥🕦"
     adjusted_hour = rounded.hour % 12
@@ -114,16 +114,13 @@ def get_track_link():
 @app.route("/daylist/light")
 @app.route("/daylist/dark")
 def daylist():
-    daylist_phrase = fetch_daylist_playlist()
-    if daylist_phrase:
-        color_scheme = "dark" if request.path.endswith("/dark") else "light"
-        svg = render_template("daylist.svg", daylist_phrase=daylist_phrase, color_scheme=color_scheme, logo=B64_SPOTIFY_LOGO)
-        response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=3600"
-        logger.info(f"Served daylist SVG: {daylist_phrase}")
-        return response
-    logger.error("Daylist SVG not ready")
-    return jsonify({"error": "Daylist SVG not ready"}), 503
+    daylist_phrase = get_daylist_phrase()
+    color_scheme = "dark" if request.path.endswith("/dark") else "light"
+    svg = render_template("daylist.svg", daylist_phrase=daylist_phrase, color_scheme=color_scheme, logo=B64_SPOTIFY_LOGO)
+    response = Response(svg, mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800"
+    logger.info(f"Served daylist SVG: {daylist_phrase}")
+    return response
 
 @app.route('/favicon.png')
 @app.route('/favicon.ico')
@@ -164,6 +161,25 @@ def get_current_track():
         return track_data
     logger.warning("No current track found")
     return None
+
+@cache.memoize(timeout=1800)
+def get_daylist_phrase():
+    time_emoji, formatted_time = get_time_info()
+    
+    try:
+        playlists = (playlist for offset in range(0, 1000, 50) for playlist in spotify_api.request(f"me/playlists?limit=50&offset={offset}")["items"])
+        daylist = next((playlist for playlist in playlists if playlist["name"].lower().startswith("daylist")), None)
+        if daylist:
+            cleaned_name = daylist["name"].split("• ", 1)[-1] if "• " in daylist["name"] else daylist["name"]
+            result = f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
+            logger.info(f"Fetched daylist: {result}")
+            return result
+        logger.warning("No daylist found in user playlists")
+    except Exception as e:
+        logger.error(f"Error fetching daylist: {str(e)}")
+    
+    # If daylist fetch fails, return a default message with the correct time
+    return f"(It's around {formatted_time} {time_emoji})"
 
 if __name__ == "__main__":
     app.run(debug=True)
