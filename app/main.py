@@ -167,8 +167,7 @@ def get_daylist_phrase():
     time_emoji, formatted_time = get_time_info()
     
     try:
-        playlists = (playlist for offset in range(0, 1000, 50) for playlist in spotify_api.request(f"me/playlists?limit=50&offset={offset}")["items"])
-        daylist = next((playlist for playlist in playlists if playlist["name"].lower().startswith("daylist")), None)
+        daylist = fetch_playlists_until_daylist()
         if daylist:
             cleaned_name = daylist["name"].split("• ", 1)[-1] if "• " in daylist["name"] else daylist["name"]
             result = f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
@@ -180,6 +179,34 @@ def get_daylist_phrase():
     
     # If daylist fetch fails, return a default message with the correct time
     return f"(It's around {formatted_time} {time_emoji})"
+
+def fetch_playlists_until_daylist():
+    """Fetch playlists in batches of 50 until we find the daylist."""
+    offset = 0
+    limit = 50
+    
+    while True:
+        response = spotify_api.request(f"me/playlists?limit={limit}&offset={offset}")
+        if not response or not response["items"]:
+            break
+            
+        # Look for daylist in current batch
+        daylist = next(
+            (playlist for playlist in response["items"] 
+             if playlist["name"].lower().startswith("daylist")), 
+            None
+        )
+        
+        if daylist:
+            return daylist
+            
+        # If we've received fewer items than requested, we're at the end
+        if len(response["items"]) < limit:
+            break
+            
+        offset += limit
+    
+    return None
 
 if __name__ == "__main__":
     app.run(debug=True)
