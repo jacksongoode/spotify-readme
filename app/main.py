@@ -51,15 +51,16 @@ class SpotifyAPI:
         return response.json()["access_token"]
 
     def request(self, endpoint):
+        """Request with endpoint-specific caching."""
         if endpoint.startswith("me/player/currently-playing"):
-            return self._request_with_cache(endpoint, timeout=60)  # Cache for 1 minute
+            return self._request_with_cache(endpoint)  # Default 1 min cache
         elif endpoint.startswith("me/player/recently-played"):
-            return self._request_with_cache(endpoint, timeout=300)  # Cache for 5 minutes
+            return self._request_with_cache(endpoint, timeout=300)  # 5 min cache
         else:
-            return self._request_with_cache(endpoint, timeout=3600)  # Cache for 1 hour
+            return self._request_no_cache(endpoint)  # No cache for other endpoints
 
-    @cache.memoize()
-    def _request_with_cache(self, endpoint, timeout):
+    def _request_no_cache(self, endpoint):
+        """Make uncached request."""
         headers = {"Authorization": f"Bearer {self.token}"}
         response = self.session.get(f"{SPOTIFY_API_BASE}/{endpoint}", headers=headers)
         if response.status_code == 401:
@@ -68,6 +69,34 @@ class SpotifyAPI:
             response = self.session.get(f"{SPOTIFY_API_BASE}/{endpoint}", headers=headers)
         response.raise_for_status()
         return response.json() if response.status_code != 204 else None
+
+    @cache.memoize(timeout=60)  # Default 1 min cache
+    def _request_with_cache(self, endpoint, timeout=60):
+        """Make cached request."""
+        return self._request_no_cache(endpoint)
+
+    def find_daylist(self):
+        """Find and cache daylist playlist."""
+        cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
+        
+        if cached := cache.get(cache_key):
+            return cached
+
+        for offset in range(0, 1000, 50):
+            playlists = self.request(f"me/playlists?limit=50&offset={offset}")
+            if not playlists or not playlists.get("items"):
+                break
+
+            if daylist := next((p for p in playlists["items"] 
+                              if p["name"].lower().startswith("daylist")), None):
+                cache.set(cache_key, daylist, timeout=1800)
+                return daylist
+
+            if len(playlists["items"]) < 50:
+                break
+
+        cache.set(cache_key, None, timeout=1800)
+        return None
 
 spotify_api = SpotifyAPI()
 
@@ -114,34 +143,36 @@ def get_track_link():
 @app.route("/daylist/light")
 @app.route("/daylist/dark")
 def daylist():
-    daylist_phrase = get_daylist_phrase()
-    color_scheme = "dark" if request.path.endswith("/dark") else "light"
-    svg = render_template("daylist.svg", daylist_phrase=daylist_phrase, color_scheme=color_scheme, logo=B64_SPOTIFY_LOGO)
-    response = Response(svg, mimetype="image/svg+xml")
-    response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800"
-    logger.info(f"Served daylist SVG: {daylist_phrase}")
-    return response
+    time_emoji, formatted_time = get_time_info()
+    
+    try:
+        daylist_phrase = (
+            f"(It's around {formatted_time} {time_emoji}, another "
+            f"{spotify_api.find_daylist()['name'].split('• ', 1)[-1]})"
+            if (daylist := spotify_api.find_daylist())
+            else f"(It's around {formatted_time} {time_emoji})"
+        )
+        
+        svg = render_template(
+            "daylist.svg",
+            daylist_phrase=daylist_phrase,
+            color_scheme="dark" if request.path.endswith("/dark") else "light",
+            logo=B64_SPOTIFY_LOGO
+        )
+        
+        response = Response(svg, mimetype="image/svg+xml")
+        response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800"
+        logger.info(f"Served daylist SVG: {daylist_phrase}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error in daylist route: {str(e)}")
+        return Response(status=500)
 
 @app.route('/favicon.png')
 @app.route('/favicon.ico')
 def favicon():
     return Response(status=204)
-
-@cache.memoize(timeout=3600)
-def fetch_daylist_playlist():
-    try:
-        playlists = (playlist for offset in range(0, 1000, 50) for playlist in spotify_api.request(f"me/playlists?limit=50&offset={offset}")["items"])
-        daylist = next((playlist for playlist in playlists if playlist["name"].lower().startswith("daylist")), None)
-        if daylist:
-            cleaned_name = daylist["name"].split("• ", 1)[-1] if "• " in daylist["name"] else daylist["name"]
-            time_emoji, formatted_time = get_time_info()
-            result = f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
-            logger.info(f"Fetched daylist: {result}")
-            return result
-        logger.warning("No daylist found in user playlists")
-    except Exception as e:
-        logger.error(f"Error fetching daylist: {str(e)}")
-    return None
 
 @cache.memoize(timeout=60)
 def get_current_track():
@@ -160,52 +191,6 @@ def get_current_track():
         logger.info(f"Fetched new track: {song} by {artist}")
         return track_data
     logger.warning("No current track found")
-    return None
-
-@cache.memoize(timeout=1800)
-def get_daylist_phrase():
-    time_emoji, formatted_time = get_time_info()
-    
-    try:
-        daylist = fetch_playlists_until_daylist()
-        if daylist:
-            cleaned_name = daylist["name"].split("• ", 1)[-1] if "• " in daylist["name"] else daylist["name"]
-            result = f"(It's around {formatted_time} {time_emoji}, another {cleaned_name})"
-            logger.info(f"Fetched daylist: {result}")
-            return result
-        logger.warning("No daylist found in user playlists")
-    except Exception as e:
-        logger.error(f"Error fetching daylist: {str(e)}")
-    
-    # If daylist fetch fails, return a default message with the correct time
-    return f"(It's around {formatted_time} {time_emoji})"
-
-def fetch_playlists_until_daylist():
-    """Fetch playlists in batches of 50 until we find the daylist."""
-    offset = 0
-    limit = 50
-    
-    while True:
-        response = spotify_api.request(f"me/playlists?limit={limit}&offset={offset}")
-        if not response or not response["items"]:
-            break
-            
-        # Look for daylist in current batch
-        daylist = next(
-            (playlist for playlist in response["items"] 
-             if playlist["name"].lower().startswith("daylist")), 
-            None
-        )
-        
-        if daylist:
-            return daylist
-            
-        # If we've received fewer items than requested, we're at the end
-        if len(response["items"]) < limit:
-            break
-            
-        offset += limit
-    
     return None
 
 if __name__ == "__main__":
