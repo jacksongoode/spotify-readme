@@ -126,6 +126,18 @@ def get_time_info():
     formatted_time = rounded.strftime("%I:%M %p").lstrip("0")
     return emoji, formatted_time
 
+def get_time_of_day_phrase():
+    """Return appropriate greeting based on time of day in LA."""
+    now = datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
+    hour = now.hour
+    
+    if hour < 12:
+        return "morning"
+    elif hour < 17:
+        return "afternoon"
+    else:
+        return "evening"
+
 @app.route("/")
 @app.route("/svg")
 def get_svg():
@@ -157,19 +169,23 @@ def daylist():
     try:
         daylist = spotify_api.find_daylist()
         
-        if daylist:
-            playlist_name = daylist['name']
-            if '• ' in playlist_name:
-                phrase = playlist_name.split('• ', 1)[-1]
-                print(f"INFO: Found daylist with phrase: '{phrase}' from playlist '{playlist_name}'")  # Direct stdout print
-            else:
-                print(f"WARNING: Invalid playlist name format: '{playlist_name}'")  # Direct stdout print
-                phrase = "daylist"
+        if daylist and '• ' in daylist['name']:
+            phrase = daylist['name'].split('• ', 1)[-1]
+            print(f"INFO: Found daylist with phrase: '{phrase}' from playlist '{daylist['name']}'")
+            
+            daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {phrase})"
+            cache_duration = 1800  # 30 minutes
         else:
-            print("WARNING: No daylist playlist found")  # Direct stdout print
-            phrase = "daylist"
-        
-        daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {phrase})"
+            # Fallback phrase when we can't get a proper daylist
+            time_of_day = get_time_of_day_phrase()
+            daylist_phrase = f"(It's around {formatted_time} {time_emoji}, {time_of_day} of music)"
+            
+            if daylist:
+                print(f"WARNING: Invalid playlist name format: '{daylist['name']}'")
+            else:
+                print("WARNING: No daylist playlist found")
+            
+            cache_duration = 60  # Only cache fallback for 1 minute
         
         svg = render_template(
             "daylist.svg",
@@ -179,13 +195,13 @@ def daylist():
         )
         
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800, must-revalidate"
+        response.headers["Cache-Control"] = f"public, max-age={cache_duration}, s-maxage={cache_duration}, must-revalidate"
         response.headers["ETag"] = f'W/"{VERCEL_COMMIT_SHA}"'
-        print(f"INFO: Served daylist SVG: {daylist_phrase}")  # Direct stdout print
+        print(f"INFO: Served daylist SVG: {daylist_phrase}")
         return response
         
     except Exception as e:
-        print(f"ERROR: Error in daylist route: {str(e)}")  # Direct stdout print
+        print(f"ERROR: Error in daylist route: {str(e)}")
         return Response(status=500)
 
 @app.route('/favicon.png')
