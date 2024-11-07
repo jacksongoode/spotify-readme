@@ -4,6 +4,7 @@ import zoneinfo
 from datetime import datetime
 import logging
 from pathlib import Path
+import sys
 
 import requests
 from dotenv import load_dotenv
@@ -13,14 +14,13 @@ from flask_caching import Cache
 # Load environment variables
 load_dotenv()
 
-# Configure logging with StreamHandler for better Vercel compatibility
-logging.basicConfig(level=logging.INFO)
+# Configure logging to write to stdout
+logging.basicConfig(
+    stream=sys.stdout,  # Write to stdout for Vercel
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s'
+)
 logger = logging.getLogger(__name__)
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(levelname)s: %(message)s')
-console_handler.setFormatter(formatter)
-logger.handlers = [console_handler]  # Replace existing handlers
 
 # Load base64 images
 base64_dir = Path(__file__).parent.parent / "base64"
@@ -155,12 +155,14 @@ def daylist():
         
         if daylist:
             playlist_name = daylist['name']
-            phrase = playlist_name.split('• ', 1)[-1] if '• ' in playlist_name else "daylist"
-            
-            if '• ' not in playlist_name:
-                logger.warning(f"Invalid playlist name format: {playlist_name}")
+            if '• ' in playlist_name:
+                phrase = playlist_name.split('• ', 1)[-1]
+                print(f"INFO: Found daylist with phrase: '{phrase}' from playlist '{playlist_name}'")  # Direct stdout print
+            else:
+                print(f"WARNING: Invalid playlist name format: '{playlist_name}'")  # Direct stdout print
+                phrase = "daylist"
         else:
-            logger.warning("No daylist playlist found")
+            print("WARNING: No daylist playlist found")  # Direct stdout print
             phrase = "daylist"
         
         daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {phrase})"
@@ -174,11 +176,11 @@ def daylist():
         
         response = Response(svg, mimetype="image/svg+xml")
         response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800"
-        logger.info(f"Served daylist SVG with phrase: {daylist_phrase}")
+        print(f"INFO: Served daylist SVG: {daylist_phrase}")  # Direct stdout print
         return response
         
     except Exception as e:
-        logger.error(f"Error in daylist route: {str(e)}")
+        print(f"ERROR: Error in daylist route: {str(e)}")  # Direct stdout print
         return Response(status=500)
 
 @app.route('/favicon.png')
