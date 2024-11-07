@@ -129,7 +129,7 @@ def get_svg():
     track_data = get_current_track()
     if track_data and track_data["svg"]:
         response = Response(track_data["svg"], mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60"
+        response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60, must-revalidate"
         logger.info(f"Served current track SVG: {track_data['song']} by {track_data['artist']}")
         return response
     logger.error("Current track SVG not ready")
@@ -175,7 +175,7 @@ def daylist():
         )
         
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800"
+        response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800, must-revalidate"
         print(f"INFO: Served daylist SVG: {daylist_phrase}")  # Direct stdout print
         return response
         
