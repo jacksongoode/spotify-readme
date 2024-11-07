@@ -13,9 +13,14 @@ from flask_caching import Cache
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure logging with StreamHandler for better Vercel compatibility
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(levelname)s: %(message)s')
+console_handler.setFormatter(formatter)
+logger.handlers = [console_handler]  # Replace existing handlers
 
 # Load base64 images
 base64_dir = Path(__file__).parent.parent / "base64"
@@ -146,12 +151,19 @@ def daylist():
     time_emoji, formatted_time = get_time_info()
     
     try:
-        daylist_phrase = (
-            f"(It's around {formatted_time} {time_emoji}, another "
-            f"{spotify_api.find_daylist()['name'].split('• ', 1)[-1]})"
-            if (daylist := spotify_api.find_daylist())
-            else f"(It's around {formatted_time} {time_emoji})"
-        )
+        daylist = spotify_api.find_daylist()
+        
+        if daylist:
+            playlist_name = daylist['name']
+            phrase = playlist_name.split('• ', 1)[-1] if '• ' in playlist_name else "daylist"
+            
+            if '• ' not in playlist_name:
+                logger.warning(f"Invalid playlist name format: {playlist_name}")
+        else:
+            logger.warning("No daylist playlist found")
+            phrase = "daylist"
+        
+        daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {phrase})"
         
         svg = render_template(
             "daylist.svg",
@@ -162,7 +174,7 @@ def daylist():
         
         response = Response(svg, mimetype="image/svg+xml")
         response.headers["Cache-Control"] = "public, max-age=1800, s-maxage=1800"
-        logger.info(f"Served daylist SVG: {daylist_phrase}")
+        logger.info(f"Served daylist SVG with phrase: {daylist_phrase}")
         return response
         
     except Exception as e:
