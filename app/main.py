@@ -1,15 +1,17 @@
 import base64
+import logging
 import os
+import sys
 import zoneinfo
 from datetime import datetime
-import logging
 from pathlib import Path
-import sys
+from xml.sax.saxutils import escape as xml_escape
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, redirect, render_template, request, Markup
+from flask import Flask, Response, jsonify, redirect, render_template, request
 from flask_caching import Cache
+from markupsafe import Markup
 
 # Load environment variables
 load_dotenv()
@@ -18,27 +20,29 @@ load_dotenv()
 logging.basicConfig(
     stream=sys.stdout,  # Write to stdout for Vercel
     level=logging.INFO,
-    format='%(levelname)s: %(message)s'
+    format="%(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 # Load base64 images
 base64_dir = Path(__file__).parent.parent / "base64"
-with open(base64_dir / "placeholder_image.txt", "rb") as f_placeholder, \
-     open(base64_dir / "spotify_logo.txt", "rb") as f_logo:
+with open(base64_dir / "placeholder_image.txt", "rb") as f_placeholder, open(
+    base64_dir / "spotify_logo.txt", "rb"
+) as f_logo:
     B64_PLACEHOLDER_IMAGE = f_placeholder.read().decode("ascii")
     B64_SPOTIFY_LOGO = f_logo.read().decode("ascii")
 
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 
 app = Flask(__name__, template_folder=str(Path(__file__).parent.parent / "templates"))
-app.config['CACHE_TYPE'] = os.environ.get('CACHE_TYPE', 'simple')
-app.config['CACHE_DEFAULT_TIMEOUT'] = int(os.environ.get('CACHE_DEFAULT_TIMEOUT', 60))
+app.config["CACHE_TYPE"] = os.environ.get("CACHE_TYPE", "simple")
+app.config["CACHE_DEFAULT_TIMEOUT"] = int(os.environ.get("CACHE_DEFAULT_TIMEOUT", 60))
 
 cache = Cache(app)
 
 # Near the top with other environment variables
-VERCEL_COMMIT_SHA = os.getenv('VERCEL_GIT_COMMIT_SHA', 'local')
+VERCEL_COMMIT_SHA = os.getenv("VERCEL_GIT_COMMIT_SHA", "local")
+
 
 class SpotifyAPI:
     def __init__(self):
@@ -74,7 +78,9 @@ class SpotifyAPI:
         if response.status_code == 401:
             self.token = self.refresh_token()
             headers["Authorization"] = f"Bearer {self.token}"
-            response = self.session.get(f"{SPOTIFY_API_BASE}/{endpoint}", headers=headers)
+            response = self.session.get(
+                f"{SPOTIFY_API_BASE}/{endpoint}", headers=headers
+            )
         response.raise_for_status()
         return response.json() if response.status_code != 204 else None
 
@@ -86,7 +92,7 @@ class SpotifyAPI:
     def find_daylist(self):
         """Find and cache daylist playlist."""
         cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
-        
+
         if cached := cache.get(cache_key):
             return cached
 
@@ -95,8 +101,14 @@ class SpotifyAPI:
             if not playlists or not playlists.get("items"):
                 break
 
-            if daylist := next((p for p in playlists["items"] 
-                              if p["name"].lower().startswith("daylist")), None):
+            if daylist := next(
+                (
+                    p
+                    for p in playlists["items"]
+                    if p["name"].lower().startswith("daylist")
+                ),
+                None,
+            ):
                 cache.set(cache_key, daylist, timeout=1800)
                 return daylist
 
@@ -106,14 +118,19 @@ class SpotifyAPI:
         cache.set(cache_key, None, timeout=1800)
         return None
 
+
 spotify_api = SpotifyAPI()
+
 
 def fetch_current_track():
     data = spotify_api.request("me/player/currently-playing")
     if not data:
         recently_played = spotify_api.request("me/player/recently-played?limit=1")
-        return recently_played["items"][0]["track"] if recently_played["items"] else None
+        return (
+            recently_played["items"][0]["track"] if recently_played["items"] else None
+        )
     return data["item"]
+
 
 def get_time_info():
     la_tz = zoneinfo.ZoneInfo("America/Los_Angeles")
@@ -122,15 +139,20 @@ def get_time_info():
     clock_emojis = "🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚"
     half_hour_emojis = "🕧🕜🕝🕞🕟🕠🕡🕢🕣🕤🕥🕦"
     adjusted_hour = rounded.hour % 12
-    emoji = clock_emojis[adjusted_hour] if rounded.minute == 0 else half_hour_emojis[adjusted_hour]
+    emoji = (
+        clock_emojis[adjusted_hour]
+        if rounded.minute == 0
+        else half_hour_emojis[adjusted_hour]
+    )
     formatted_time = rounded.strftime("%I:%M %p").lstrip("0")
     return emoji, formatted_time
+
 
 def get_time_of_day_phrase():
     """Return appropriate greeting based on time of day in LA."""
     now = datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
     hour = now.hour
-    
+
     if hour < 12:
         return "morning"
     elif hour < 17:
@@ -138,18 +160,24 @@ def get_time_of_day_phrase():
     else:
         return "evening"
 
+
 @app.route("/")
 @app.route("/svg")
 def get_svg():
     track_data = get_current_track()
     if track_data and track_data["svg"]:
         response = Response(track_data["svg"], mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = "public, max-age=60, s-maxage=60, must-revalidate"
+        response.headers["Cache-Control"] = (
+            "public, max-age=60, s-maxage=60, must-revalidate"
+        )
         response.headers["ETag"] = f'W/"{VERCEL_COMMIT_SHA}"'
-        logger.info(f"Served current track SVG: {track_data['song']} by {track_data['artist']}")
+        logger.info(
+            f"Served current track SVG: {track_data['song']} by {track_data['artist']}"
+        )
         return response
     logger.error("Current track SVG not ready")
     return jsonify({"error": "SVG not ready"}), 503
+
 
 @app.route("/link")
 def get_track_link():
@@ -160,73 +188,104 @@ def get_track_link():
     logger.error("No track link available")
     return jsonify({"error": "No track link available"}), 404
 
+
 @app.route("/daylist")
 @app.route("/daylist/light")
 @app.route("/daylist/dark")
 def daylist():
     time_emoji, formatted_time = get_time_info()
-    
+
     try:
         daylist = spotify_api.find_daylist()
-        
-        if daylist and '• ' in daylist['name']:
-            phrase = daylist['name'].split('• ', 1)[-1]
-            print(f"INFO: Found daylist with phrase: '{phrase}' from playlist '{daylist['name']}'")
-            
-            daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {phrase})"
+
+        if daylist and "• " in daylist["name"]:
+            phrase = daylist["name"].split("• ", 1)[-1]
+            print(
+                f"INFO: Found daylist with phrase: '{phrase}' from playlist '{daylist['name']}'"
+            )
+
+            daylist_phrase = (
+                f"(It's around {formatted_time} {time_emoji}, another {phrase})"
+            )
             cache_duration = 1800  # 30 minutes
         else:
             # Fallback phrase when we can't get a proper daylist
             time_of_day = get_time_of_day_phrase()
-            daylist_phrase = f"(It's around {formatted_time} {time_emoji}, {time_of_day} of music)"
-            
+            daylist_phrase = (
+                f"(It's around {formatted_time} {time_emoji}, {time_of_day} of music)"
+            )
+
             if daylist:
                 print(f"WARNING: Invalid playlist name format: '{daylist['name']}'")
             else:
                 print("WARNING: No daylist playlist found")
-            
+
             cache_duration = 60  # Only cache fallback for 1 minute
-        
+
         svg = render_template(
             "daylist.svg",
             daylist_phrase=daylist_phrase,
             color_scheme="dark" if request.path.endswith("/dark") else "light",
-            logo=B64_SPOTIFY_LOGO
+            logo=B64_SPOTIFY_LOGO,
         )
-        
+
         response = Response(svg, mimetype="image/svg+xml")
-        response.headers["Cache-Control"] = f"public, max-age={cache_duration}, s-maxage={cache_duration}, must-revalidate"
+        response.headers["Cache-Control"] = (
+            f"public, max-age={cache_duration}, s-maxage={cache_duration}, must-revalidate"
+        )
         response.headers["ETag"] = f'W/"{VERCEL_COMMIT_SHA}"'
         print(f"INFO: Served daylist SVG: {daylist_phrase}")
         return response
-        
+
     except Exception as e:
         print(f"ERROR: Error in daylist route: {str(e)}")
         return Response(status=500)
 
-@app.route('/favicon.png')
-@app.route('/favicon.ico')
+
+@app.route("/favicon.png")
+@app.route("/favicon.ico")
 def favicon():
     return Response(status=204)
+
 
 @cache.memoize(timeout=60)
 def get_current_track():
     current_track = fetch_current_track()
     if current_track:
-        image_url = current_track["album"]["images"][1]["url"] if current_track["album"]["images"] else None
-        image_data = B64_PLACEHOLDER_IMAGE if not image_url else requests.get(image_url).content
-        artist = Markup(current_track["artists"][0]["name"])
-        song = Markup(current_track["name"])
+        image_url = (
+            current_track["album"]["images"][1]["url"]
+            if current_track["album"]["images"]
+            else None
+        )
+        image_data = (
+            B64_PLACEHOLDER_IMAGE if not image_url else requests.get(image_url).content
+        )
+
+        # First escape XML entities, then wrap in Markup to prevent double-escaping
+        artist = Markup(xml_escape(current_track["artists"][0]["name"]))
+        song = Markup(xml_escape(current_track["name"]))
+
         track_data = {
-            "svg": render_template("recent.html", artist=artist, song=song, image=base64.b64encode(image_data).decode("ascii"), logo=B64_SPOTIFY_LOGO),
+            "svg": render_template(
+                "recent.html",
+                artist=artist,
+                song=song,
+                image=base64.b64encode(image_data).decode("ascii"),
+                logo=B64_SPOTIFY_LOGO,
+            ),
             "link": current_track["external_urls"]["spotify"],
             "artist": artist,
-            "song": song
+            "song": song,
         }
         logger.info(f"Fetched new track: {song} by {artist}")
         return track_data
     logger.warning("No current track found")
     return None
 
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Check if we're in development or production
+    is_development = os.environ.get("FLASK_ENV") == "development"
+
+    # Only enable debug mode in development
+    app.run(debug=is_development)
