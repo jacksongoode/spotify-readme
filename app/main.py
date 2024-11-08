@@ -8,7 +8,7 @@ import sys
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, redirect, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, Markup
 from flask_caching import Cache
 
 # Load environment variables
@@ -215,8 +215,8 @@ def get_current_track():
     if current_track:
         image_url = current_track["album"]["images"][1]["url"] if current_track["album"]["images"] else None
         image_data = B64_PLACEHOLDER_IMAGE if not image_url else requests.get(image_url).content
-        artist = current_track["artists"][0]["name"].replace("&", "&amp;")
-        song = current_track["name"].replace("&", "&amp;")
+        artist = Markup(current_track["artists"][0]["name"])
+        song = Markup(current_track["name"])
         track_data = {
             "svg": render_template("recent.html", artist=artist, song=song, image=base64.b64encode(image_data).decode("ascii"), logo=B64_SPOTIFY_LOGO),
             "link": current_track["external_urls"]["spotify"],
