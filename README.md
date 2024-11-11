@@ -1,6 +1,6 @@
 # Spotify Readme
 
-A fork of a popular Spotify currently playing widget. Cleaned up and added a click through to redirect to last playing song.
+A fork of a popular Spotify currently playing widget. Cleaned up and added a phrase for your daylist and a click through to redirect to last playing song.
 
 ## Preview
 
@@ -8,13 +8,21 @@ A fork of a popular Spotify currently playing widget. Cleaned up and added a cli
 /svg
 ```
 
-![Preview](https://jackson-spotify.vercel.app/svg)
+![Preview](https://spotify.jackson.gd/svg)
 
 ```
 /link
 ```
 
-[Link to the song](https://jackson-spotify.vercel.app/link)
+[Link to the song](https://spotify.jackson.gd/link)
+
+```
+/daylist
+/daylist/light
+/daylist/dark
+```
+
+[Daylist](https://spotify.jackson.gd/daylist)
 
 ## Required variables
 
