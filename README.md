@@ -22,7 +22,7 @@ A fork of a popular Spotify currently playing widget. Cleaned up and added a phr
 /daylist/dark
 ```
 
-[Daylist](https://spotify.jackson.gd/daylist)
+![Daylist](https://spotify.jackson.gd/daylist)
 
 ## Required variables
 
