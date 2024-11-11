@@ -211,9 +211,7 @@ def daylist():
         else:
             # Fallback phrase when we can't get a proper daylist
             time_of_day = get_time_of_day_phrase()
-            daylist_phrase = (
-                f"(It's around {formatted_time} {time_emoji}, {time_of_day} of music)"
-            )
+            daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {time_of_day} of music)"
 
             if daylist:
                 print(f"WARNING: Invalid playlist name format: '{daylist['name']}'")
