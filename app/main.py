@@ -197,28 +197,24 @@ def daylist():
 
     try:
         daylist = spotify_api.find_daylist()
+        time_of_day = get_time_of_day_phrase()
 
-        if daylist and "• " in daylist["name"]:
+        # Set default phrase first to avoid None access
+        daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {time_of_day} of music)"
+        cache_duration = 60
+
+        # Only try to access daylist properties if it exists
+        if daylist and "name" in daylist and "• " in daylist["name"]:
             phrase = daylist["name"].split("• ", 1)[-1]
-            print(
-                f"INFO: Found daylist with phrase: '{phrase}' from playlist '{daylist['name']}'"
+            logger.info(
+                f"Found daylist with phrase: '{phrase}' from playlist '{daylist['name']}'"
             )
-
             daylist_phrase = (
                 f"(It's around {formatted_time} {time_emoji}, another {phrase})"
             )
-            cache_duration = 1800  # 30 minutes
+            cache_duration = 1800
         else:
-            # Fallback phrase when we can't get a proper daylist
-            time_of_day = get_time_of_day_phrase()
-            daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {time_of_day} of music)"
-
-            if daylist:
-                print(f"WARNING: Invalid playlist name format: '{daylist['name']}'")
-            else:
-                print("WARNING: No daylist playlist found")
-
-            cache_duration = 60  # Only cache fallback for 1 minute
+            logger.warning("No valid daylist found or invalid format")
 
         svg = render_template(
             "daylist.svg",
@@ -232,11 +228,11 @@ def daylist():
             f"public, max-age={cache_duration}, s-maxage={cache_duration}, must-revalidate"
         )
         response.headers["ETag"] = f'W/"{VERCEL_COMMIT_SHA}"'
-        print(f"INFO: Served daylist SVG: {daylist_phrase}")
+        logger.info(f"Served daylist SVG: {daylist_phrase}")
         return response
 
     except Exception as e:
-        print(f"ERROR: Error in daylist route: {str(e)}")
+        logger.error(f"Error in daylist route: {str(e)}")
         return Response(status=500)
 
 
