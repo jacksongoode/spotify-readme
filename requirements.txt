@@ -21,6 +21,8 @@ flask-apscheduler==1.13.1
     # via spotify-readme (pyproject.toml)
 flask-caching==2.3.0
     # via spotify-readme (pyproject.toml)
+greenlet==3.1.1
+    # via playwright
 idna==3.10
     # via requests
 itsdangerous==2.2.0
@@ -29,8 +31,13 @@ jinja2==3.1.4
     # via flask
 markupsafe==3.0.1
     # via
+    #   spotify-readme (pyproject.toml)
     #   jinja2
     #   werkzeug
+playwright==1.49.0
+    # via spotify-readme (pyproject.toml)
+pyee==12.0.0
+    # via playwright
 python-dateutil==2.9.0.post0
     # via flask-apscheduler
 python-dotenv==1.0.1
@@ -43,6 +50,8 @@ six==1.16.0
     # via
     #   apscheduler
     #   python-dateutil
+typing-extensions==4.12.2
+    # via pyee
 tzlocal==5.2
     # via apscheduler
 urllib3==2.2.3
