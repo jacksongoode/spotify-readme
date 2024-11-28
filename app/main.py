@@ -3,8 +3,10 @@ import logging
 import os
 import sys
 import time
+import zipfile
 import zoneinfo
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
@@ -181,24 +183,31 @@ class SpotifyAPI:
         """Get daylist from GitHub artifact if available."""
         cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
 
-        # Check memory cache first
         if cached := cache.get(cache_key):
             logger.info(f"Using memory-cached daylist phrase: {cached}")
             return cached
 
         try:
-            # Try to read from artifact file
-            data_file = Path(__file__).parent.parent / "data" / "daylist.txt"
-            if data_file.exists():
-                phrase = data_file.read_text().strip()
-                if phrase:
-                    logger.info(f"Using file-cached daylist phrase: {phrase}")
-                    cache.set(cache_key, phrase, timeout=1800)
-                    return phrase
-        except Exception as e:
-            logger.error(f"Error reading cached daylist: {e}")
+            logger.info("Fetching daylist from GitHub artifact")
+            with requests.get(
+                "https://nightly.link/jacksongoode/spotify-readme/workflows/update-daylist/main/daylist.zip",
+                stream=True,
+            ) as response:
+                response.raise_for_status()
 
-        # Fallback to browser automation if needed
+                with zipfile.ZipFile(BytesIO(response.content)) as zip_ref:
+                    if txt_file := next(
+                        (f for f in zip_ref.namelist() if f.endswith(".txt")), None
+                    ):
+                        phrase = zip_ref.read(txt_file).decode("utf-8").strip()
+                        if phrase:
+                            logger.info(f"Using artifact daylist phrase: {phrase}")
+                            cache.set(cache_key, phrase, timeout=1800)
+                            return phrase
+
+        except Exception as e:
+            logger.error(f"Error reading artifact daylist: {e}")
+
         return self.find_daylist()
 
 
