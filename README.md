@@ -33,3 +33,5 @@ This new implementation uses Playwright to sign in, search for the daylist, and 
 - `CLIENT_ID`
 - `CLIENT_SECRET`
 - `REFRESH_TOKEN`
+- `SPOTIFY_USER`
+- `SPOTIFY_PASS`
