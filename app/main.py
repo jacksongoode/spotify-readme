@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import sys
+import time
 import zoneinfo
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request
 from flask_caching import Cache
 from markupsafe import Markup
+from playwright.sync_api import sync_playwright
 
 # Load environment variables
 load_dotenv()
@@ -47,20 +49,27 @@ VERCEL_COMMIT_SHA = os.getenv("VERCEL_GIT_COMMIT_SHA", "local")
 class SpotifyAPI:
     def __init__(self):
         self.session = requests.Session()
-        self.token = self.refresh_token()
+        self.token = None
+        self.token_expires = 0
+        self.refresh_token_str = os.getenv("REFRESH_TOKEN")
+        self.token = self._refresh_token()
 
-    def refresh_token(self):
+    def _refresh_token(self):
+        """Refresh the access token and update expiration time."""
         response = self.session.post(
             "https://accounts.spotify.com/api/token",
             data={
                 "grant_type": "refresh_token",
-                "refresh_token": os.getenv("REFRESH_TOKEN"),
+                "refresh_token": self.refresh_token_str,
                 "client_id": os.getenv("CLIENT_ID"),
                 "client_secret": os.getenv("CLIENT_SECRET"),
             },
         )
         response.raise_for_status()
-        return response.json()["access_token"]
+        data = response.json()
+        self.token = data["access_token"]
+        self.token_expires = time.time() + data.get("expires_in", 3600) - 60
+        return self.token
 
     def request(self, endpoint):
         """Request with endpoint-specific caching."""
@@ -73,14 +82,21 @@ class SpotifyAPI:
 
     def _request_no_cache(self, endpoint):
         """Make uncached request."""
+        # Check token expiration
+        if time.time() > self.token_expires:
+            self._refresh_token()
+
         headers = {"Authorization": f"Bearer {self.token}"}
         response = self.session.get(f"{SPOTIFY_API_BASE}/{endpoint}", headers=headers)
+
+        # Handle 401 as backup (shouldn't normally happen with expiration check)
         if response.status_code == 401:
-            self.token = self.refresh_token()
+            self._refresh_token()
             headers["Authorization"] = f"Bearer {self.token}"
             response = self.session.get(
                 f"{SPOTIFY_API_BASE}/{endpoint}", headers=headers
             )
+
         response.raise_for_status()
         return response.json() if response.status_code != 204 else None
 
@@ -90,33 +106,100 @@ class SpotifyAPI:
         return self._request_no_cache(endpoint)
 
     def find_daylist(self):
-        """Find and cache daylist playlist."""
+        """Find daylist using Playwright with UI login."""
         cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
 
+        # Check cache first
         if cached := cache.get(cache_key):
+            logger.info(f"Using cached daylist phrase: {cached}")
             return cached
 
-        for offset in range(0, 1000, 50):
-            playlists = self.request(f"me/playlists?limit=50&offset={offset}")
-            if not playlists or not playlists.get("items"):
-                break
+        spotify_user = os.getenv("SPOTIFY_USER")
+        spotify_pass = os.getenv("SPOTIFY_PASS")
 
-            if daylist := next(
-                (
-                    p
-                    for p in playlists["items"]
-                    if p["name"].lower().startswith("daylist")
-                ),
-                None,
-            ):
-                cache.set(cache_key, daylist, timeout=1800)
-                return daylist
+        if not spotify_user or not spotify_pass:
+            logger.error("Missing Spotify credentials")
+            return None
 
-            if len(playlists["items"]) < 50:
-                break
+        try:
+            logger.info("Fetching daylist via browser")
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
 
-        cache.set(cache_key, None, timeout=1800)
+                page = browser.new_context().new_page()
+                page.set_default_timeout(30000)  # 30 seconds
+
+                # Login
+                logger.info("Logging in...")
+                page.goto(
+                    "https://accounts.spotify.com/login", wait_until="networkidle"
+                )
+                page.fill("#login-username", spotify_user)
+                page.fill("#login-password", spotify_pass)
+
+                with page.expect_navigation():
+                    page.click("#login-button")
+
+                # Navigate to web player
+                logger.info("Opening web player...")
+                page.click("button[data-testid='web-player-link']")
+                page.wait_for_load_state("networkidle")
+
+                # Search for daylist (twice to handle DRM)
+                logger.info("Searching for daylist...")
+                for _ in range(2):
+                    page.goto(
+                        "https://open.spotify.com/search/daylist",
+                        wait_until="networkidle",
+                    )
+                    page.wait_for_timeout(500)
+
+                # Find daylist
+                element = page.wait_for_selector('a[title^="daylist • "]')
+                if element:
+                    title = element.get_attribute("title")
+                    if "• " in title:
+                        phrase = title.split("• ", 1)[1]
+                        logger.info(f"Found daylist: {title}")
+                        cache.set(
+                            cache_key, phrase, timeout=1800
+                        )  # Cache for 30 minutes
+                        return phrase
+
+        except Exception as e:
+            logger.error(f"Error finding daylist: {e}")
+            return None
+
+        logger.warning("No daylist found")
+        cache.set(cache_key, None, timeout=1800)  # Cache negative result
         return None
+
+    def get_cached_daylist(self):
+        """Get daylist from GitHub artifact if available."""
+        cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
+
+        # Check memory cache first
+        if cached := cache.get(cache_key):
+            logger.info(f"Using memory-cached daylist phrase: {cached}")
+            return cached
+
+        try:
+            # Try to read from artifact file
+            data_file = Path(__file__).parent.parent / "data" / "daylist.txt"
+            if data_file.exists():
+                phrase = data_file.read_text().strip()
+                if phrase:
+                    logger.info(f"Using file-cached daylist phrase: {phrase}")
+                    cache.set(cache_key, phrase, timeout=1800)
+                    return phrase
+        except Exception as e:
+            logger.error(f"Error reading cached daylist: {e}")
+
+        # Fallback to browser automation if needed
+        return self.find_daylist()
 
 
 spotify_api = SpotifyAPI()
@@ -196,25 +279,22 @@ def daylist():
     time_emoji, formatted_time = get_time_info()
 
     try:
-        daylist = spotify_api.find_daylist()
+        phrase = spotify_api.get_cached_daylist()
         time_of_day = get_time_of_day_phrase()
 
-        # Set default phrase first to avoid None access
+        # Set default phrase
         daylist_phrase = f"(It's around {formatted_time} {time_emoji}, another {time_of_day} of music)"
         cache_duration = 60
 
-        # Only try to access daylist properties if it exists
-        if daylist and "name" in daylist and "• " in daylist["name"]:
-            phrase = daylist["name"].split("• ", 1)[-1]
-            logger.info(
-                f"Found daylist with phrase: '{phrase}' from playlist '{daylist['name']}'"
-            )
+        # Only update phrase if we got a valid one from find_daylist
+        if phrase:
+            logger.info(f"Found daylist with phrase: '{phrase}'")
             daylist_phrase = (
                 f"(It's around {formatted_time} {time_emoji}, another {phrase})"
             )
             cache_duration = 1800
         else:
-            logger.warning("No valid daylist found or invalid format")
+            logger.warning("No valid daylist found")
 
         svg = render_template(
             "daylist.svg",

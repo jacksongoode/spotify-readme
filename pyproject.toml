@@ -11,4 +11,5 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "requests>=2.32.3",
     "markupsafe>=3.0.1",
+    "playwright>=1.49.0",
 ]
