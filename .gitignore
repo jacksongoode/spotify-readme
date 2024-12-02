@@ -32,6 +32,8 @@ dist/
 build/
 *.egg-info/
 
-previews
 .vercel
 .env.development.local
+data/daylist.txt
+app/.spotify_cookies.json
+screenshots/

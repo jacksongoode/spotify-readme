@@ -1,6 +1,8 @@
 import base64
+import json
 import logging
 import os
+import random
 import sys
 import time
 import zipfile
@@ -108,13 +110,9 @@ class SpotifyAPI:
         return self._request_no_cache(endpoint)
 
     def find_daylist(self):
-        """Find daylist using Playwright with UI login."""
+        """Find daylist using Playwright with cookie persistence."""
         cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
-
-        # Check cache first
-        if cached := cache.get(cache_key):
-            logger.info(f"Using cached daylist phrase: {cached}")
-            return cached
+        cookie_file = Path(__file__).parent / ".spotify_cookies.json"
 
         spotify_user = os.getenv("SPOTIFY_USER")
         spotify_pass = os.getenv("SPOTIFY_PASS")
@@ -123,61 +121,92 @@ class SpotifyAPI:
             logger.error("Missing Spotify credentials")
             return None
 
+        def random_wait():
+            """Add random wait time between 0.5 and 2 seconds."""
+            time.sleep(random.uniform(0.5, 2))
+
+        def perform_search(page):
+            """Perform search and handle DRM popup."""
+            logger.info("Searching for daylist")
+            page.goto(
+                "https://open.spotify.com/search/daylist", wait_until="networkidle"
+            )
+            random_wait()
+
         try:
-            logger.info("Fetching daylist via browser")
+            logger.info("Starting browser session")
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
                     args=["--disable-blink-features=AutomationControlled"],
                 )
 
-                page = browser.new_context().new_page()
-                page.set_default_timeout(30000)  # 30 seconds
-
-                # Login
-                logger.info("Logging in...")
-                page.goto(
-                    "https://accounts.spotify.com/login", wait_until="networkidle"
+                context = browser.new_context(
+                    viewport={"width": 1280, "height": 720},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0 Safari/537.36",
                 )
-                page.fill("#login-username", spotify_user)
-                page.fill("#login-password", spotify_pass)
 
-                with page.expect_navigation():
-                    page.click("#login-button")
+                # Load cookies if they exist
+                if cookie_file.exists():
+                    logger.info("Loading saved cookies")
+                    context.add_cookies(json.loads(cookie_file.read_text()))
 
-                # Navigate to web player
-                logger.info("Opening web player...")
-                page.click("button[data-testid='web-player-link']")
-                page.wait_for_load_state("networkidle")
+                page = context.new_page()
+                page.set_default_timeout(30000)
 
-                # Search for daylist (twice to handle DRM)
-                logger.info("Searching for daylist...")
-                for _ in range(2):
+                # Initial search attempt
+                perform_search(page)
+
+                # Handle login if needed
+                if page.get_by_text("Log in").is_visible():
+                    logger.info("Session expired, logging in")
                     page.goto(
-                        "https://open.spotify.com/search/daylist",
-                        wait_until="networkidle",
+                        "https://accounts.spotify.com/login", wait_until="networkidle"
                     )
-                    page.wait_for_timeout(500)
+                    random_wait()
 
-                # Find daylist
-                element = page.wait_for_selector('a[title^="daylist • "]')
-                if element:
-                    title = element.get_attribute("title")
-                    if "• " in title:
-                        phrase = title.split("• ", 1)[1]
-                        logger.info(f"Found daylist: {title}")
-                        cache.set(
-                            cache_key, phrase, timeout=1800
-                        )  # Cache for 30 minutes
-                        return phrase
+                    page.fill("#login-username", spotify_user)
+                    random_wait()
+                    page.fill("#login-password", spotify_pass)
+                    random_wait()
 
-        except Exception as e:
-            logger.error(f"Error finding daylist: {e}")
+                    with page.expect_navigation(wait_until="networkidle"):
+                        page.click("#login-button")
+                    random_wait()
+
+                    # Save cookies and navigate to web player
+                    cookie_file.write_text(json.dumps(context.cookies()))
+                    page.click("button[data-testid='web-player-link']")
+                    page.wait_for_load_state("networkidle")
+                    random_wait()
+
+                    # Repeat search after login
+                    perform_search(page)
+
+                # Final search to handle DRM
+                perform_search(page)
+
+                # Look for daylist
+                try:
+                    if element := page.wait_for_selector(
+                        'a[title^="daylist • "]', timeout=10000
+                    ):
+                        title = element.get_attribute("title")
+                        if "• " in title:
+                            phrase = title.split("• ", 1)[1]
+                            logger.info(f"Found daylist: {title}")
+                            cache.set(cache_key, phrase, timeout=1800)
+                            return phrase
+                except Exception as e:
+                    logger.error(f"Failed to find daylist: {e}")
+                    page.screenshot(path="screenshots/search_failed.png")
+
+            logger.warning("No daylist found")
             return None
 
-        logger.warning("No daylist found")
-        cache.set(cache_key, None, timeout=1800)  # Cache negative result
-        return None
+        except Exception as e:
+            logger.error(f"Error in find_daylist: {e}", exc_info=True)
+            return None
 
     def get_cached_daylist(self):
         """Get daylist from GitHub artifact if available."""
