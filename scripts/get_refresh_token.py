@@ -1,19 +1,20 @@
 import base64
+import logging
 import os
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import quote, urlencode
+
 import requests
 from dotenv import load_dotenv
-import logging
 
 # Load environment variables
 load_dotenv()
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REDIRECT_URI = 'http://localhost:8000/callback/'
+REDIRECT_URI = "http://localhost:8000/callback/"
 
 # All available Spotify API scopes
 SCOPES = [
@@ -22,6 +23,8 @@ SCOPES = [
     "user-top-read",
     "user-read-recently-played",
     "user-library-read",
+    "user-read-currently-playing",
+    "user-read-playback-state",
 ]
 
 # Global variable to store the authorization code
@@ -30,6 +33,7 @@ auth_code_received = threading.Event()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -44,7 +48,7 @@ class CallbackHandler(BaseHTTPRequestHandler):
 
 
 def start_local_server():
-    httpd = HTTPServer(('localhost', 8000), CallbackHandler)
+    httpd = HTTPServer(("localhost", 8000), CallbackHandler)
     httpd.serve_forever()
 
 
@@ -102,11 +106,11 @@ if __name__ == "__main__":
         refresh_token = get_refresh_token()
         if refresh_token:
             logger.info(f"Refresh Token: {refresh_token}")
-            
+
             # Update .env file with the new refresh token
             with open(".env", "r") as file:
                 env_contents = file.read()
-            
+
             if "REFRESH_TOKEN" in env_contents:
                 env_contents = env_contents.replace(
                     f"REFRESH_TOKEN=\"{os.getenv('REFRESH_TOKEN')}\"",
@@ -114,11 +118,11 @@ if __name__ == "__main__":
                 )
             else:
                 env_contents += f'\nREFRESH_TOKEN="{refresh_token}"'
-            
+
             with open(".env", "w") as file:
                 file.write(env_contents)
-            
-            logger.info('Refresh token has been updated in the .env file.')
+
+            logger.info("Refresh token has been updated in the .env file.")
         else:
             logger.error("Failed to obtain refresh token")
     except Exception as e:
