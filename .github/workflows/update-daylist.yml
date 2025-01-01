@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: "*/30 * * * *" # Run every 30 minutes
   workflow_dispatch: # Allow manual triggers
+  push: # Run on any push to any branch
 
 permissions:
   contents: read
