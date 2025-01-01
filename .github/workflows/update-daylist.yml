@@ -5,6 +5,10 @@ on:
     - cron: "*/30 * * * *" # Run every 30 minutes
   workflow_dispatch: # Allow manual triggers
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   update-daylist:
     runs-on: ubuntu-latest
@@ -27,6 +31,33 @@ jobs:
         run: |
           playwright install chromium
           playwright install-deps chromium
+
+      - name: Create .env file
+        run: |
+          echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> .env
+          echo "CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}" >> .env
+          echo "REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}" >> .env
+
+      - name: Refresh Spotify Token
+        env:
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+        run: python scripts/get_refresh_token.py
+
+      - name: Update GitHub Secret
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+        id: app-token
+
+      - name: Update REFRESH_TOKEN secret
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          NEW_REFRESH_TOKEN=$(grep REFRESH_TOKEN .env | cut -d '"' -f 2)
+          gh secret set REFRESH_TOKEN --body "$NEW_REFRESH_TOKEN"
 
       - name: Run daylist fetcher
         env:
