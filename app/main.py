@@ -55,25 +55,50 @@ class SpotifyAPI:
         self.session = requests.Session()
         self.token = None
         self.token_expires = 0
+
+        # Validate required environment variables
+        required_vars = ["REFRESH_TOKEN", "CLIENT_ID", "CLIENT_SECRET"]
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+
+        if missing_vars:
+            raise ValueError(
+                f"Missing required environment variables: {', '.join(missing_vars)}"
+            )
+
         self.refresh_token_str = os.getenv("REFRESH_TOKEN")
         self.token = self._refresh_token()
 
     def _refresh_token(self):
         """Refresh the access token and update expiration time."""
-        response = self.session.post(
-            "https://accounts.spotify.com/api/token",
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": self.refresh_token_str,
-                "client_id": os.getenv("CLIENT_ID"),
-                "client_secret": os.getenv("CLIENT_SECRET"),
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-        self.token = data["access_token"]
-        self.token_expires = time.time() + data.get("expires_in", 3600) - 60
-        return self.token
+        try:
+            response = self.session.post(
+                "https://accounts.spotify.com/api/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token_str,
+                    "client_id": os.getenv("CLIENT_ID"),
+                    "client_secret": os.getenv("CLIENT_SECRET"),
+                },
+            )
+
+            if response.status_code == 400:
+                error_data = response.json()
+                logger.error(
+                    f"Token refresh failed: {error_data.get('error_description', 'Unknown error')}"
+                )
+                raise ValueError(
+                    f"Token refresh failed: {error_data.get('error_description', 'Unknown error')}"
+                )
+
+            response.raise_for_status()
+            data = response.json()
+            self.token = data["access_token"]
+            self.token_expires = time.time() + data.get("expires_in", 3600) - 60
+            return self.token
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to refresh token: {str(e)}")
+            raise
 
     def request(self, endpoint):
         """Request with endpoint-specific caching."""
