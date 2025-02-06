@@ -9,11 +9,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from app.main import SpotifyAPI
 
-# Configure logging with more detailed format for GitHub Actions
 log_format = "%(asctime)s - %(levelname)s - %(message)s"
 if os.environ.get("GITHUB_ACTIONS"):
     log_format = (
-        "::%(levelname)s:: %(message)s"  # GitHub Actions workflow command format
+        "::%(levelname)s:: %(message)s"
     )
 
 logging.basicConfig(level=logging.INFO, format=log_format, stream=sys.stdout)

@@ -1,4 +1,4 @@
-<svg width="450" height="21" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMin meet" overflow="visible">
+<svg width="600" height="21" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMin meet" overflow="visible">
   <style>
     .text { 
       fill: {% if color_scheme == "dark" %}#ffffff{% else %}#000000{% endif %};
@@ -6,7 +6,7 @@
       font-size: 14px;
     }
   </style>
-  <text x="225" y="17" dominant-baseline="alphabetic" text-anchor="middle" class="text">
+  <text x="300" y="17" dominant-baseline="alphabetic" text-anchor="middle" class="text">
     {{ daylist_phrase }}
   </text>
 </svg>
