@@ -39,6 +39,7 @@ with open(base64_dir / "placeholder_image.txt", "rb") as f_placeholder, open(
     B64_SPOTIFY_LOGO = f_logo.read().decode("ascii")
 
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+DEFAULT_TIMEZONE = "Asia/Tokyo"
 
 app = Flask(__name__, template_folder=str(Path(__file__).parent.parent / "templates"))
 app.config["CACHE_TYPE"] = os.environ.get("CACHE_TYPE", "simple")
@@ -138,7 +139,7 @@ class SpotifyAPI:
 
     def find_daylist(self, headless=True):
         """Find daylist using Playwright with cookie persistence."""
-        cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
+        cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo(DEFAULT_TIMEZONE)).strftime('%Y-%m-%d_%H')}"
         cookie_file = Path(__file__).parent / ".spotify_cookies.json"
 
         spotify_user = os.getenv("SPOTIFY_USER")
@@ -358,7 +359,7 @@ class SpotifyAPI:
 
     def get_cached_daylist(self, headless=True):
         """Get daylist from GitHub artifact if available."""
-        cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d_%H')}"
+        cache_key = f"daylist_{datetime.now(zoneinfo.ZoneInfo(DEFAULT_TIMEZONE)).strftime('%Y-%m-%d_%H')}"
 
         if cached := cache.get(cache_key):
             logger.info(f"Using memory-cached daylist phrase: {cached}")
@@ -402,7 +403,7 @@ def fetch_current_track():
 
 
 def get_time_info():
-    la_tz = zoneinfo.ZoneInfo("America/Los_Angeles")
+    la_tz = zoneinfo.ZoneInfo(DEFAULT_TIMEZONE)
     now = datetime.now(la_tz)
     rounded = now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0)
     clock_emojis = "🕛🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚"
@@ -419,7 +420,7 @@ def get_time_info():
 
 def get_time_of_day_phrase():
     """Return appropriate greeting based on time of day in LA."""
-    now = datetime.now(zoneinfo.ZoneInfo("America/Los_Angeles"))
+    now = datetime.now(zoneinfo.ZoneInfo(DEFAULT_TIMEZONE))
     hour = now.hour
 
     if hour < 12:
